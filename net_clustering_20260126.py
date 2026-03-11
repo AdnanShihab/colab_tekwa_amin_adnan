@@ -117,3 +117,41 @@ class net_bus_clustering:
             self.commercial_clusters,
             self.mixed_clusters
         )
+
+    def build_bus_cluster_map(self):        # used to exclude NET from CAPEX_PV function
+        # define clusters (same as in your function)
+        industrial_clusters = {
+            "C1": [72, 108, 289, 269, 110, 75, 196, 103, 101, 106],
+            "C2": [6, 5, 7, 241, 24, 290, 4, 242, 243, 244, 8, 245],
+            "C3": [71, 81, 73, 77, 119, 80, 117, 35, 45, 47, 148, 120, 49, 52, 55, 146, 145],
+        }
+        residential_clusters = {
+            "C1": [48, 50, 44, 192, 42, 51, 34, 76],
+            "C2": [161, 38, 173, 174, 162],
+        }
+        commercial_clusters = {
+            "C1": [82, 79, 190, 64, 65, 36],
+        }
+
+        # add mixed cluster (same logic, but WITHOUT adding loads)
+        all_buses = set(self.net.bus.index)
+        predefined = set(b for cl in industrial_clusters.values() for b in cl) | \
+                     set(b for cl in residential_clusters.values() for b in cl) | \
+                     set(b for cl in commercial_clusters.values() for b in cl)
+        remaining = all_buses - predefined
+        mixed_clusters = {"C1": list(remaining)}
+
+        # bus -> label used to index PV_CAPEX
+        bus_to_cluster = {}
+
+        def add(mapping, group, clusters):
+            for cname, buses in clusters.items():
+                for b in buses:
+                    mapping[b] = f"{group}_{cname}"   # e.g. industrial_C1
+
+        add(bus_to_cluster, "industrial", industrial_clusters)
+        add(bus_to_cluster, "residential", residential_clusters)
+        add(bus_to_cluster, "commercial", commercial_clusters)
+        add(bus_to_cluster, "mixed", mixed_clusters)
+
+        return bus_to_cluster

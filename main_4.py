@@ -10,6 +10,7 @@ warnings.simplefilter(action='ignore', category=DeprecationWarning)
 
 import pandas as pd
 import numpy as np
+import copy
 # import pandapower as pp
 
 # pd.set_option('display.max_columns', None)
@@ -27,13 +28,14 @@ from pymoo.core.variable import Real, Integer, Binary
 from net_clustering_20260126 import net_bus_clustering
 from e_net_20260128 import power_system, TS
 from CAPEX_fuct_20250724 import CAPEX
-from OPEX_func_20250726 import opex
+from OPEX_20260306 import opex
 # from mv_oberrhein_exisitng_sgen_allocation import find_cluster_for_bus
 
 # ........................ Power grid ........................
 net_old = pn.mv_oberrhein()
 # print("Original Network Info:")
 # print(net_old.load[['bus', 'p_mw']])
+# print(net_old.load['p_mw'].sum(), "MW")
 # print("Net Org PV total", net_old.sgen['p_mw'].sum(), "MW")
 # print()
 
@@ -85,8 +87,8 @@ print("Total used busbar by loads in network:", len(buses_load))
 # ........................ Fixed parameters ........................
 discount_rate = 0.08
 
-min_v_drop = 0.95
-max_v_drop = 1.05
+min_v_drop = 0.90
+max_v_drop = 1.10
 
 # ============================================== Optimization Function ===========================================
 
@@ -199,15 +201,15 @@ class MyProblem(ElementwiseProblem):
             for label in self.cluster_labels
         }
 
-        super().__init__(vars=variables, n_obj=1, n_ieq_constr=2, **kwargs)
+        super().__init__(vars=variables, n_obj=1, n_ieq_constr=1, **kwargs)
 
     def _evaluate(self, x, out, *args, **kwargs):
 
         # print("\nEvaluating new solution...")
         # --- Create a fresh copy of the network for each evaluation ---
-        import copy
-        net_local = copy.deepcopy(net)  # Use local copy instead of global net
+        # net_local = copy.deepcopy(net)  # Use local copy instead of global net
         # net_local = net  # TEST
+        # net_base = copy.deepcopy(net)
 
         # =============================== Define x values ===============================
         # ----------------------------- PV -----------------------------
@@ -379,30 +381,44 @@ class MyProblem(ElementwiseProblem):
         elif self.stage == 3:
             print("Calc Carried Capacity for stage 3...")
 
-        # ------------------------- Predefine parameters--------------------------
+        # ============================================ Predefine parameters ==========================================
         total_stage_cost = 0
         # obj_value_eur = 0
         # # obj_value_tco2 = 0
 
-        g2026_power_grid, g1_power_grid_jul, g2031_power_grid = 0, 0, 0
+        # g2026_power_grid, g1_power_grid_jul, g2031_power_grid = 0, 0, 0
+        g_years = []
         penalty = 0  # also added as G
 
-        time_steps = 24
+        time_steps = 4
 
         #  ------------------------- Calculation per year ---------------------------------
         # print("Calculating stage cost...")
         # Calculate power grid for January and July
         for year in self.stage_years:
+            print("*" * 30 + " Start Loop " + "*" * 30)
+            net_local = copy.deepcopy(net)  # Start from base network (net) for each year
 
-            # Calculate year-specific operational parameters
-            year_index = year - 2025  # Relative year for discounting
+            # To calculate NPV for each year OPEX and each stage CAPEX (discount to 2026)
+            base_year = 2026
+            year_index = year - base_year
+            stage_start_year = self.stage_years[0]
+            stage_index = stage_start_year - base_year
+
+            # year_index = year - 2026
+
+            # To calculate NPV for each stage (discount to the first year of the stage)
+            # stage_start_year = self.stage_years[0]  # Make sure to add the first year of each stage
+            # years_from_base = stage_start_year - 2026  # Assuming 2026 is base year
+            # # print("stage_start_year =", stage_start_year)
+
             # print("year_index =", year_index)
+            # print("years_from_base =", stage_index)
+            # print()
 
             if year == 2026:
-                print("=" * 50 + " Year 2026 " + "=" * 50)
-
+                print("=" * 25 + " Year 2026 " + "=" * 25)
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
-
                 # print(x_pv_mw)
                 # print("x_pv_mw * x_pv_bin =", x_pv_mw * x_pv_bin)
                 # print(x_wt_mw)
@@ -435,10 +451,17 @@ class MyProblem(ElementwiseProblem):
                 # net_hour_11 = net_update[11]
 
                 power_balance_2026_jan = results.iloc[:, 0:6]
-                vm_jan = results.iloc[:, 6:186]
+                vm = results.iloc[:, 6:186]     # voltage dataframe
+                v = vm.to_numpy(dtype=float)    # (n_time, n_voltage_cols)
                 print("Power Balance 2026 Jan:\n", power_balance_2026_jan)
-                print(f"{'-' * 50}")
+                # print("vm: \n", vm)
+                # print("v: \n", v)
 
+                # Compare numerically vm and v (only works if shapes match)
+                # if vm.shape == v.shape:
+                #     print("max abs diff:", np.max(np.abs(vm.to_numpy(dtype=float) - v)))
+
+                # print(f"{'-' * 50}")
                 # print("loads = \n", net_hour_0.load['p_mw'])
                 # For CAPEX I can just use [0], because it is enough to define \
                 # the bus-bars if it is industrial or etc.
@@ -456,7 +479,7 @@ class MyProblem(ElementwiseProblem):
                                    # net=net_local,
                                    x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,     # only taking pv size if bin=1
                                    x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw*x_wt_bin,     # making WT size 0 if bin=0
-                                   x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw,  # only taking bess_mw if bin=0
+                                   x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw,  # only taking bess_mw if bin=1
                                    tau_bess=p_sys.bess_params["duration_h"],
                                    bus_to_cluster=bus_to_cluster
                                    )  # CHANGE: net_update=net_local
@@ -468,82 +491,355 @@ class MyProblem(ElementwiseProblem):
                 capex_stage = capex_pv + capex_wt + capex_bess
 
                 print(f"{'-' * 50}")
-                print("capex_pv_2026 =", capex_pv)
-                print("capex_wt_2026 =", capex_wt)
-                print("capex_bess_2026 =", capex_bess)
-                print()
+                # print("capex_pv_2026 =", capex_pv)
+                # print("capex_wt_2026 =", capex_wt)
+                # print("capex_bess_2026 =", capex_bess)
+                # print()
                 print("capex_2026 =", capex_stage)
 
-                # Apply NPV discount to CAPEX (discount to beginning of stage)
-                stage_start_year = self.stage_years[0]      # Make sure to add the first year of each stage
-                years_from_base = stage_start_year - 2025   # Assuming 2025 is base year
-
-                # print("stage_start_year =", stage_start_year)
-                # print("years_from_base =", years_from_base)
-                print()
-
-                capex_stage_npv = capex_stage * (1 / (1 + discount_rate) ** years_from_base)
+                # -------- Apply NPV discount to CAPEX (discount to beginning of stage) ----------------------
+                capex_stage_npv = capex_stage * (1 / (1 + discount_rate) ** stage_index)
                 print(f"Stage {self.stage} CAPEX NPV: {capex_stage_npv}")
-                print(f"{'-' * 50}")
 
                 total_stage_cost += capex_stage_npv
+                print()
 
                 # --------------------------------------- OPEX 2026 --------------------------------------
-                # DO IT AFTER ALL THE FIRST YEAR OF ALL STAGES CALCULATIONS.....
-                """
-                stage_opex_total = 0
-                cost_opex = opex(stage=self.stage, year=year_index, net_update=net_local,
-                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw*x_pv_bin)    # CHANGE: net_update=net_hour_0
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
 
-                opex_var_loc_elem_2026 = cost_opex.opex_var_loc_elem_2026()
-                # print("OPEX_2026 =", opex_var_loc_elem_2026)
+                # ---> Sanity test for opex function
+                # x_pv_bus = [72, 82, 48]
+                # x_pv_mw = [1.0, 0.5, 0.3]
+                # bus_to_cluster = {
+                #     72: "industrial_C1",
+                #     82: "commercial_C1",
+                #     48: "residential_C1"
+                # }
 
-                # OLD:
-                # opex_fix_loc_elem_2025 = cost_opex.opex_fixed_loc_elem_2025()
-                # opex_e_net_2025 = cost_opex.opex_e_net_2025()
-
-                opex_year = opex_var_loc_elem_2026
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
-                stage_opex_total += opex_year_npv
 
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
                 print(f"Year {year} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
 
-                total_stage_cost += stage_opex_total
-                """
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g2026 based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                # >>> Sanity check of the conversion from vm to v:
+                # print(vm.columns[:5])
+                # print(vm.dtypes.head())
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2027:
-                print("year 2027")
+                print("=" * 25 + " Year 2027 " + "=" * 25)
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
-                # ----------------------------- Add net and opex only -----------------------------
+                # print("x_pv_mw2027 =", x_pv_mw)
+                # print("x_pv_bus2027 =", x_pv_bus)
+                # print("x_wt_mw * x_wt_bin =", x_wt_mw * x_wt_bin)
 
-                # total_stage_cost += opex_year
-                # total_stage_cost += 10  # TEST
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # >>> Not using net_update at the moment
+                # year, season = year
+                data = TS[year]
+                results, net_update = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                # print("Power System Results 2027 Jan:\n", results)
+                # print("Updated Network 2027 Jan:\n", net_update)
+
+                power_balance = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance 2027:\n", power_balance.head(24))
+                print(f"{'-' * 50}")
+
+                # ----------------------------- OPEX 2027 -----------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                # ---> Sanity test for opex function
+                # x_pv_bus = [72, 82, 48]
+                # x_pv_mw = [1.0, 0.5, 0.3]
+                # bus_to_cluster = {
+                #     72: "industrial_C1",
+                #     82: "commercial_C1",
+                #     48: "residential_C1"
+                # }
+                cost_opex = opex(stage=self.stage, year=year,
+                            x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                            bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX PV: {opex_pv}")
+                print(f"Year {year_index} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g2026 based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+
+                # >>> Sanity check of the conversion from vm to v:
+                # print(vm.columns[:5])
+                # print(vm.dtypes.head())
+
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2028:
-                print("year 2028")
+                print("=" * 25 + " Year 2028 " + "=" * 25)
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
-                # ----------------------------- Add net and opex only -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # >>> Not using net_update at the moment
+                # year, season = year
+                data = TS[year]
+                results, net_update = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                # print("Power System Results 2027 Jan:\n", results)
+                # print("Updated Network 2027 Jan:\n", net_update)
 
-                # total_stage_cost += opex_year
-                # total_stage_cost += 10  # TEST
+                power_balance = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance.head(24))
+                print(f"{'-' * 50}")
+                # ----------------------------- OPEX 2027 -----------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                # ---> Sanity test for opex function
+                # x_pv_bus = [72, 82, 48]
+                # x_pv_mw = [1.0, 0.5, 0.3]
+                # bus_to_cluster = {
+                #     72: "industrial_C1",
+                #     82: "commercial_C1",
+                #     48: "residential_C1"
+                # }
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX PV: {opex_pv}")
+                print(f"Year {year_index} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g2026 based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+
+                # >>> Sanity check of the conversion from vm to v:
+                # print(vm.columns[:5])
+                # print(vm.dtypes.head())
+
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2029:
-                print("year 2029")
+                print("=" * 25 + " Year 2029 " + "=" * 25)
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
-                # ----------------------------- Add net and opex only -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # >>> Not using net_update at the moment
+                # year, season = year
+                data = TS[year]
+                results, net_update = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                # print("Power System Results 2027 Jan:\n", results)
+                # print("Updated Network 2027 Jan:\n", net_update)
 
-                # total_stage_cost += opex_year
-                # total_stage_cost += 10  # TEST
+                power_balance = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance.head(24))
+                print(f"{'-' * 50}")
+                # ----------------------------- OPEX 2027 -----------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                # ---> Sanity test for opex function
+                # x_pv_bus = [72, 82, 48]
+                # x_pv_mw = [1.0, 0.5, 0.3]
+                # bus_to_cluster = {
+                #     72: "industrial_C1",
+                #     82: "commercial_C1",
+                #     48: "residential_C1"
+                # }
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX PV: {opex_pv}")
+                print(f"Year {year_index} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g2026 based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+
+                # >>> Sanity check of the conversion from vm to v:
+                # print(vm.columns[:5])
+                # print(vm.dtypes.head())
+
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2030:
-                print("year 2030")
+                print("=" * 25 + " Year 2030 " + "=" * 25)
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # >>> Not using net_update at the moment
+                # year, season = year
+                data = TS[year]
+                results, net_update = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                # print("Power System Results 2027 Jan:\n", results)
+                # print("Updated Network 2027 Jan:\n", net_update)
 
-                # ----------------------------- Add net and opex only -----------------------------
+                power_balance = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance.head(24))
+                print(f"{'-' * 50}")
+                # ----------------------------- OPEX 2027 -----------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
 
-                # total_stage_cost += opex_year
-                # total_stage_cost += 10  # TEST
+                # ---> Sanity test for opex function
+                # x_pv_bus = [72, 82, 48]
+                # x_pv_mw = [1.0, 0.5, 0.3]
+                # bus_to_cluster = {
+                #     72: "industrial_C1",
+                #     82: "commercial_C1",
+                #     48: "residential_C1"
+                # }
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
 
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX PV: {opex_pv}")
+                print(f"Year {year_index} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g2026 based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+
+                # >>> Sanity check of the conversion from vm to v:
+                # print(vm.columns[:5])
+                # print(vm.dtypes.head())
+
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             # =============================================== Stage 2 ================================================
             elif year == 2031:
-                print("="*50 + " Year 2031 " + "="*50)
+                print("="*25 + " Year 2031 " + "="*25)
 
                 # ----------------------------- POWER SYSTEM & BESS -----------------------------
                 p_sys = power_system(net=net_local, x=x,
@@ -551,10 +847,6 @@ class MyProblem(ElementwiseProblem):
                                      x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
                                      x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
                                      )
-
-                # res_p_sys_jan = p_sys.power_flow_2031_feb()
-                # results, net_update = res_p_sys_jan
-
                 # year, season = year
                 data = TS[year]
                 results, nets = p_sys.power_flow_timeseries(
@@ -564,22 +856,11 @@ class MyProblem(ElementwiseProblem):
                     # heat_demand_ts=data['heat_demand'],
                     time_steps=time_steps
                 )
-
-                # print("Power System Results 2026 Jan:\n", results)
-                # print("Updated Network 2026 Jan:\n", net_update)
-
-                # net_hour_0 = net_update[0]  # Using to define the location of the bus-bars.
-                # net_hour_11 = net_update[11]
-
                 power_balance_jan = results.iloc[:, 0:6]
-                vm_jan = results.iloc[:, 6:186]
-                print("Power Balance 2031 Jan:\n", power_balance_jan)
+                vm = results.iloc[:, 6:186]     # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance_jan)
                 print(f"{'-' * 50}")
-
-                # print("loads = \n", net_hour_0.load['p_mw'])
-                # For CAPEX I can just use [0], because it is enough to define \
-                # the bus-bars if it is industrial or etc.
-                # print("PV = \n", net_hour_0.sgen['p_mw'])
 
                 # ----------------------------- Calculation per Stage -----------------------------
                 # --------------------------------------- CAPEX -----------------------------------
@@ -601,46 +882,273 @@ class MyProblem(ElementwiseProblem):
 
                 capex_stage = capex_pv + capex_wt + capex_bess
 
-                print(f"{'-' * 50}")
-                print("capex_pv =", capex_pv)
-                print("capex_wt =", capex_wt)
-                print("capex_bess =", capex_bess)
+                # print("capex_pv =", capex_pv)
+                # print("capex_wt =", capex_wt)
+                # print("capex_bess =", capex_bess)
                 print("capex Stage =", capex_stage)
-                print()
 
                 # Apply NPV discount to CAPEX (discount to beginning of stage)
-                stage_start_year = self.stage_years[0]  # Make sure to add the first year of each stage
-                years_from_base = stage_start_year - 2025  # Assuming 2025 is base year
+                # stage_start_year = self.stage_years[0]  # Make sure to add the first year of each stage
+                # years_from_base = stage_start_year - 2025  # Assuming 2025 is base year
                 # print("stage_start_year =", stage_start_year)
                 # print("years_from_base =", years_from_base)
 
-                capex_stage_npv = capex_stage * (1 / (1 + discount_rate) ** years_from_base)
+                capex_stage_npv = capex_stage * (1 / (1 + discount_rate) ** stage_index)
                 print(f"Stage {self.stage} CAPEX NPV: {capex_stage_npv}")
+                print()
+
+                # --------------------------------------- OPEX 2026 --------------------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
+                print(f"Year {year} OPEX NPV: {opex_year_npv}")
                 print(f"{'-' * 50}")
 
-                total_stage_cost += capex_stage_npv
+                #  ----------------------------------- Emissions -----------------------------------
 
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2032:
-                print("year 2032")
-                # Add net and opex only
+                print("=" * 25 + " Year 2032 " + "=" * 25)
 
-                # total_stage_cost += opex_year
-                # total_stage_cost += 10  # TEST
+                # ----------------------------- POWER SYSTEM & BESS -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # year, season = year
+                data = TS[year]
+                results, nets = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                power_balance_jan = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance_jan)
+                print(f"{'-' * 50}")
+
+                # --------------------------------------- OPEX 2026 --------------------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
+                print(f"Year {year} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2033:
-                print("year 2033")
-                # Add net and opex only
+                print("=" * 25 + " Year 2033 " + "=" * 25)
 
-                # total_stage_cost += opex_year
+                # ----------------------------- POWER SYSTEM & BESS -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # year, season = year
+                data = TS[year]
+                results, nets = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                power_balance_jan = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance_jan)
+                print(f"{'-' * 50}")
+
+                # --------------------------------------- OPEX 2026 --------------------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
+                print(f"Year {year} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2034:
-                print("year 2034")
-                # Add net and opex only
+                print("=" * 25 + " Year 2034 " + "=" * 25)
 
-                # total_stage_cost += opex_year
+                # ----------------------------- POWER SYSTEM & BESS -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # year, season = year
+                data = TS[year]
+                results, nets = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                power_balance_jan = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance_jan)
+                print(f"{'-' * 50}")
+
+                # --------------------------------------- OPEX 2026 --------------------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
+                print(f"Year {year} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             elif year == 2035:
-                print("year 2035")
-                # Add net and opex only
+                print("=" * 25 + " Year 2035 " + "=" * 25)
 
-                # total_stage_cost += opex_year
+                # ----------------------------- POWER SYSTEM & BESS -----------------------------
+                p_sys = power_system(net=net_local, x=x,
+                                     x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                     x_wt_bus=x_wt_bus, x_wt_mw=x_wt_mw * x_wt_bin,
+                                     x_bess_bus=x_bess_bus, x_bess_mw=x_bess_mw, bess_params=None
+                                     )
+                # year, season = year
+                data = TS[year]
+                results, nets = p_sys.power_flow_timeseries(
+                    e_demand_ts=data['e_demand'],
+                    irradiance_ts=data['irr'],
+                    wind_ts=data['wind'],
+                    # heat_demand_ts=data['heat_demand'],
+                    time_steps=time_steps
+                )
+                power_balance_jan = results.iloc[:, 0:6]
+                vm = results.iloc[:, 6:186]  # voltage dataframe
+                v = vm.to_numpy(dtype=float)  # (n_time, n_voltage_cols)
+                print("Power Balance:\n", power_balance_jan)
+                print(f"{'-' * 50}")
+
+                # --------------------------------------- OPEX 2026 --------------------------------------
+                cluster = net_bus_clustering(net_local)
+                bus_to_cluster = cluster.build_bus_cluster_map()
+
+                cost_opex = opex(stage=self.stage, year=year,
+                                 x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
+                                 bus_to_cluster=bus_to_cluster)
+                opex_pv = cost_opex.opex_pv()
+                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+
+                opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
+
+                # stage_opex_total += opex_year_npv
+                total_stage_cost += opex_year_npv
+
+                print(f"Year {year} OPEX YEAR: {opex_year}")
+                print(f"Year {year} OPEX NPV: {opex_year_npv}")
+                print(f"{'-' * 50}")
+
+                #  ----------------------------------- Emissions -----------------------------------
+
+                #  ----------------------------------- Constraints -----------------------------------
+                # Power grid
+                # Note: This will calculate g based on the maximum deviation of the voltage
+                # values from the acceptable range [0.90, 1.10].
+                low_viol = np.maximum(min_v_drop - v, 0.0)
+                high_viol = np.maximum(v - max_v_drop, 0.0)
+                # g_voltage_2026 = (low_viol + high_viol).sum()  # total magnitude of violation (scalar)
+                g_voltage = np.max(low_viol + high_viol)  # max violation across all time steps and buses (scalar)
+                g_years.append(g_voltage)
+                print("g_list: \n", g_years)
             # =============================================== Stage 3 ================================================
             elif year == 2036:
                 print("=" * 50 + " Year 2036 " + "=" * 50)
@@ -672,10 +1180,16 @@ class MyProblem(ElementwiseProblem):
                 # print("PV = \n", net_hour_0.sgen['p_mw'])
 
                 # OPEX:
+
+        print()
         print(f"Stage {self.stage} Total Cost: {total_stage_cost}")
+        print("G_list: ", g_years)
+
+        g_stage = max(g_years)  # Overall constraint violation for the stage is the maximum violation across all years
 
         # out["penalty"] = penalty
-        out["G"] = [g2026_power_grid, g2031_power_grid]
+        # out["G"] = [g2026_power_grid, g2031_power_grid]
+        out["G"] = np.array([g_stage], dtype=float)     # [g_stage]
         out["F"] = [total_stage_cost]
 
 
@@ -730,11 +1244,11 @@ total_project_cost = 0
 
 # years = list(range(2026, 2027))
 
-pop_size = 10
-gen_size = 10
+pop_size = 2
+gen_size = 2
 
 # ================= STAGE-LEVEL OPTIMIZATION =================
-for stage_num in [1, 2]:     # CHANGE: for stage_num in [1, 2, 3]:
+for stage_num in [2]:     # CHANGE: for stage_num in [1, 2, 3]:
     stage_years = stages[stage_num]
 
     print(f"\n{'=' * 50}")
@@ -775,7 +1289,7 @@ for stage_num in [1, 2]:     # CHANGE: for stage_num in [1, 2, 3]:
     # Optimize for this stage
     res = minimize(prob, algorithm, termination, seed=1, verbose=True)
 
-    # OLD:
+    # # OLD:
     # # Extract best solution
     # # best_idx = np.argmin(res.F[:, 0])
     # best_idx = res.F
