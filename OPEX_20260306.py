@@ -1,34 +1,20 @@
 
-# -------------------------------------- PV Parameters --------------------------------------
-pv_life_time = 25
-land_area_pv = 16187    # OLD value = 9290  # [m2 per 1 MW solar]
-# roof_top_area_pv = 6000  # [m2 per 1 MW solar]
+"""
+Cost evolution for OPEX components with different escalation/de-escalation rates.
+For now just PV, WT OPEX are included.
+"""
 
-# Land cost -----------------------
-cost_land_industry_2025 = 0.35      # [EUR/m2*Year] --> used for Gas Gen, PV and BESS
-cost_land_industry_2026 = cost_land_industry_2025*1.03
-
-# Rooftop leasing cost ----------------
-cost_rooftop_leasing_commercial_2026 = 1.5    # EUR/m2*Year; EUR 15000 per 5000 m2 --> used for PV
-cost_rooftop_leasing_commercial_2027 = cost_rooftop_leasing_commercial_2026*1.01
-
-cost_rooftop_leasing_residential_2026 = 3.0     # PV kept higher than commercial areas, as it is harder for the
-# operators to enforce PV installation on the residential houses.
-cost_rooftop_leasing_residential_2027 = cost_rooftop_leasing_residential_2026*1.01
-
-# Fixed OM cost ---------------
-cost_fom_pv_ground_2025 = 10000     # [EUR/MW*Year] -- DLR in OneNote
-cost_fom_pv_ground_2026 = 9600
-
-cost_fom_pv_roof_2025 = 7000        # [EUR/MW*Year] -- DLR in OneNote
-cost_fom_pv_roof_2026 = 6800
-
-# ---------------------------------- NEW 20260306 ----------------------------------
+# ---------------------------------- PV ----------------------------------
 LAND_AREA_PV = 16187  # m2 per MW
 LAND_ESCALATION = 0.03          # +3 %
 ROOFTOP_ESCALATION = 0.01       # +1 %
 FOM_DEESCALATION = -0.02        # −2 %
 
+# Beloe the base year are defined based on the origin of the data.
+# For example, the rooftop leasing cost for commercial areas is based on the 2026 value,
+# as it is expected that the cost will increase in the future.
+# The fixed O&M cost for PV ground is based on the 2025 value,
+# as it is expected that the cost will decrease in the future due to technological advancements and economies of scale.
 PV_OPEX_PARAMS_ESCALATE = {
     "industrial": {
         "type": "rooftop",
@@ -73,14 +59,20 @@ PV_OPEX_PARAMS_ESCALATE = {
     }
 }
 
-# -------------------------------------- WT Parameters --------------------------------------
-wt_life_time = 30       # life-time
+# # ---------------------------------- WT ----------------------------------
+WT_LIFETIME = 30
 
-cost_land_lease_2025 = 0.061     # EUR/m2/year
+# Base year
+WT_BASE_YEAR = 2025
 
-land_area_wt = 80937.2  # [square meters/1MW] --> 1 MW needs approx. 20 acres
+# Land
+COST_LAND_LEASE_WT_2025 = 0.061      # EUR/m2/year
+LAND_AREA_WT = 80937.2               # m2 per MW
+LAND_ESCALATION_WT = 0.03            # e.g. +3 %
 
-cost_fom_wt_2025 = 38000        # EUR/m2/year
+# Fixed O&M
+COST_FOM_WT_2025 = 38000             # EUR/MW/year
+# FOM_DEESCALATION_WT = -0.01           # e.g. −1 %
 
 
 # -------------------------------------- CHP Parameters --------------------------------------
@@ -205,8 +197,10 @@ e_price_curt_eur_mwh_2034 = 80
 
 class opex:
     def __init__(self, stage, year,
+                 bus_to_cluster,
                  x_pv_bus, x_pv_mw,
-                 bus_to_cluster, **kwargs): #, x_wt_bus, x_wt_mw,
+                 x_wt_mw, **kwargs):
+
                  # demand_e_mwh_jan, sgen_mwh_jan, bess_mwh_jan, gas_gen_mwh_jan, ext_e_mwh_jan,
                  # x_chp_bus, x_chp_mw, chp_ch4_import_jan, chp_ch4_import_jul,
                  # x_hp_bus, x_hp_size, x_storage_th_size, x_p2g_size_mw,
@@ -216,10 +210,11 @@ class opex:
 
         self.stage = stage
         self.year = year
+        self.bus_to_cluster = bus_to_cluster
         # self.net_update = net_update
         self.x_pv_bus = x_pv_bus
         self.x_pv_mw = x_pv_mw
-        self.bus_to_cluster = bus_to_cluster
+        self.x_wt_mw = x_wt_mw
 
     def evolve_cost(self, base_cost, base_year, target_year, annual_rate):
         """
@@ -229,106 +224,6 @@ class opex:
         """
 
         return base_cost * (1 + annual_rate) ** (target_year - base_year)
-
-    def opex_fixed_loc_elem_2025(self):     # Yearly cost calculation
-        cost_om_fixed_loc_element_2025 = 0
-
-        # ---------------------------- WT OM ----------------------------
-        cost_wt_2025 = (self.x_wt_mw * cost_land_lease_2025 * land_area_wt) + \
-                (cost_fom_wt_2025 * self.x_wt_mw)   # considering the agricultural land used in WT installations
-        # are cheaper than the land lease cost for PV
-        cost_om_fixed_loc_element_2025 += cost_wt_2025
-
-        # ---------------------------- P2G OM ----------------------------
-        cost_p2g_2025 = (self.x_p2g_size_mw * cost_land_business_2025 * land_area_p2g) + \
-                (cost_fom_p2g_2025 * self.x_p2g_size_mw)
-        cost_om_fixed_loc_element_2025 += cost_p2g_2025
-
-        # ---------------------------- H2 import OM ----------------------------
-        # ************** H2 import cost Jan **************
-        cost_h2_import_jan = cost_h2_import_2025 * self.h2_import_jan
-        # ************** H2 import cost Jul **************
-        cost_h2_import_jul = cost_h2_import_2025 * self.h2_import_jul
-
-        cost_om_fixed_loc_element_2025 += (cost_h2_import_jan + cost_h2_import_jul) / 2 * 365
-
-        # ---------------------------- CHP OM ----------------------------
-        cost_chp_om_2025 = (self.x_chp_mw * cost_land_residential_2025 * land_area_chp) + \
-                        (cost_fom_chp_2025 * self.x_chp_mw)
-        # ************** CHP - Fuel cost Jan **************
-        cost_chp_ch4_import_2025_jan = cost_ch4_import_2025 * self.chp_ch4_import_jan
-        # ************** CHP - Fuel cost Jul **************
-        cost_chp_ch4_import_2025_jul = cost_ch4_import_2025 * self.chp_ch4_import_jul
-
-        cost_om_fixed_loc_element_2025 += cost_chp_om_2025 + cost_chp_ch4_import_2025_jan + cost_chp_ch4_import_2025_jul
-
-        # ---------------------------- Heat Pump OM ----------------------------
-        cost_opex_hp_2025 = (self.x_hp_size * cost_land_residential_2025 * land_area_hp) + \
-                           (cost_fom_hp_2025 * self.x_hp_size)
-        cost_om_fixed_loc_element_2025 += cost_opex_hp_2025
-
-        # ---------------------------- Gas Gen OM bus = 12 ----------------------------
-        cost_gen_bus12_2025 = (self.x_gen_bus_12_mw * cost_land_industry_2025 * land_area_gen) + \
-                        (cost_fom_gen_2025 * self.x_gen_bus_12_mw)
-        cost_om_fixed_loc_element_2025 += cost_gen_bus12_2025       # used the cost of Ind. location
-        # ---------------------------- Gas Gen OM bus = 1 ----------------------------
-        cost_gen_bus1_2025 = (self.x_gen_bus_1_mw * cost_land_industry_2025 * land_area_gen) + \
-                              (cost_fom_gen_2025 * self.x_gen_bus_1_mw)
-        cost_om_fixed_loc_element_2025 += cost_gen_bus1_2025        # used the cost of Ind. location
-
-        # ---------------------------- Th Storage OM ----------------------------
-        cost_fom_th_storage = (self.x_storage_th_size * cost_land_residential_2025 * land_area_th_storage) + \
-                              (cost_fom_th_storage_2025 * self.x_storage_th_size)
-        cost_om_fixed_loc_element_2025 += cost_fom_th_storage
-
-        # ---------------------------- H2 Storage OM ----------------------------
-        # blue_h2_mwh_import cost
-        # h2_storage cost
-
-        return cost_om_fixed_loc_element_2025
-
-    def opex_var_loc_elem_2026(self):  # Yearly cost calculation -> New Jul 2025
-        cost_om_var_loc_element = 0
-
-        # ---------------------------- PV OPEX CALC. -------------------------------
-        cost_om_pv = 0
-
-        # for v_x_pv_bus, v_x_pv_size in zip(self.x_pv_bus, self.x_pv_size):
-        for idx, row in self.net_update.load.iterrows():
-            # print("idx =", idx)
-            # print("row =", row['p_mw'])
-
-            # Industrial area
-            if row['p_mw'] >= 0.50:
-                # print("Ind area bus idx =", idx)
-
-                pv_mw = self.x_pv_mw[idx]
-                # print("pv_size =", pv_mw)
-
-                cost_om_pv_ = (pv_mw*cost_land_industry_2026*land_area_pv) + (pv_mw*cost_fom_pv_ground_2026)
-                cost_om_pv += cost_om_pv_
-                # print("total_capex_pv =\n", total_capex_pv)
-            # Residential area
-            elif row['p_mw'] < 0.3:
-                # print("Res area bus idx =", idx)
-
-                pv_mw = self.x_pv_mw[idx]
-                # print("pv_size =\n", pv_mw)
-
-                cost_om_pv_ = (pv_mw * cost_rooftop_leasing_residential_2026 * land_area_pv) + (pv_mw * cost_fom_pv_roof_2026)
-                cost_om_pv += cost_om_pv_
-            # Commercial area
-            else:
-                # print("Comm. area bus idx =", idx)
-                pv_mw = self.x_pv_mw[idx]
-
-                cost_om_pv_ = (pv_mw * cost_rooftop_leasing_commercial_2026 * land_area_pv) + (pv_mw * cost_fom_pv_roof_2026)
-                cost_om_pv += cost_om_pv_
-            # print("cost_om_pv =", cost_om_pv)
-
-        cost_om_var_loc_element += cost_om_pv
-        # print("cost_om_var_loc_element =", cost_om_var_loc_element)
-        return cost_om_var_loc_element
 
     def opex_pv(self):
         total_opex = 0.0
@@ -375,5 +270,66 @@ class opex:
             #     f"PV={pv_mw} MW | "
             #     f"FOM={fom_cost:.1f} | LOC={loc_cost:.1f}"
             # )
+
+        return total_opex
+
+    def evolve_wt_fom(self, base_cost, year):
+        """
+        Piecewise de-escalation of WT fixed O&M.
+        2026–2030:  -1.08 % / year
+        2031–2045:  -0.34 % / year
+        Base year = 2025
+        """
+
+        if year <= 2025:
+            return base_cost
+        # Phase 1: 2026–2030
+        cost_2030 = base_cost * (1 - 0.0108) ** min(year - 2025, 5)
+
+        if year <= 2030:
+            return cost_2030
+        # Phase 2: 2031–2045
+        return cost_2030 * (1 - 0.0034) ** (year - 2030)
+
+    def evolve_wt_land_cost(self, base_cost, base_year, target_year, rate):
+        return base_cost * (1 + rate) ** (target_year - base_year)
+
+    def opex_wt(self):
+        """
+        Wind turbine OPEX for all years.
+        - Land lease: escalating
+        - FOM: piecewise de-escalating
+        """
+
+        total_opex = 0.0
+        year = self.year
+        print("Year =", year)
+
+        for wt_mw in self.x_wt_mw:
+            if wt_mw <= 0:
+                continue
+
+            # -------- Land lease (ESCALATING) --------
+            land_cost = self.evolve_wt_land_cost(
+                COST_LAND_LEASE_WT_2025,
+                2025,
+                year,
+                LAND_ESCALATION_WT
+            )
+            land_opex = wt_mw * land_cost * LAND_AREA_WT
+            print(f"WT MW={wt_mw} | Land Cost={land_cost:.4f} EUR/m2/year | |land area={LAND_AREA_WT:.2f}| "
+                  f"Land OPEX={land_opex:.1f} EUR/year")
+
+            # -------- Fixed O&M (PIECEWISE DE-ESCALATION) --------
+            fom_mw = self.evolve_wt_fom(
+                COST_FOM_WT_2025,
+                year
+            )
+            fom_opex = wt_mw * fom_mw
+            print(f"WT MW={wt_mw} | FOM Cost={fom_mw:.1f} EUR/MW/year | FOM OPEX={fom_opex:.1f} EUR/year")
+
+            total_opex += land_opex + fom_opex
+            print(f"Total OPEX={total_opex:.1f} EUR/year")
+            print()
 
         return total_opex

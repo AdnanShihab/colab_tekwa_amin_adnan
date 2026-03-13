@@ -1,3 +1,12 @@
+"""
+This module defines the net_bus_clustering class, which provides functionality to cluster busbars in a
+pandapower network based on predefined categories (industrial, residential, commercial)
+and an automatically generated mixed cluster.
+
+The class includes methods to clear existing loads, assign buses to clusters, add new loads with specified parameters,
+and build a mapping of busbars to their respective clusters for use in other functions (e.g., CAPEX_PV, or OPEX...).
+"""
+
 import pandapower as pp
 
 class net_bus_clustering:

@@ -1,4 +1,12 @@
-# New structure with CAPEX outside the for loop of stage calculation:
+
+"""
+Date: 20260311
+
+Stages:
+stage1 = 2026-2030
+stage2 = 2031-2035
+stage3 = ...
+"""
 
 import time
 start_time = time.time()  # Start the simulation
@@ -27,7 +35,7 @@ from pymoo.core.variable import Real, Integer, Binary
 # ........................ External functions ........................
 from net_clustering_20260126 import net_bus_clustering
 from e_net_20260128 import power_system, TS
-from CAPEX_fuct_20250724 import CAPEX
+from CAPEX_20260311 import CAPEX
 from OPEX_20260306 import opex
 # from mv_oberrhein_exisitng_sgen_allocation import find_cluster_for_bus
 
@@ -251,35 +259,12 @@ class MyProblem(ElementwiseProblem):
         new_wt_mw_array[:] = np.asarray(x_wt_mw, dtype=float) * np.asarray(x_wt_bin, dtype=float)
 
         if self.stage == 2:
-            # df_carried_capacity_pv = pd.DataFrame(self.carried_cap_pv_array_mw, columns=['pv_mw'])
-            # for i, x_pv_mw_new, x_pv_mw_carried in zip(x_pv_mw, df_carried_capacity_pv):
-            #     print(f"New PV capacity added: {x_pv_mw_new:.2f} MW")
-            #     pv_total_mw = x_pv_mw_new + x_pv_mw_carried
-            #     new_pv_mw_array = np.append(new_pv_mw_array, pv_total_mw)
-            #     x_pv_mw = new_pv_mw_array
-
             carried_pv = np.asarray(self.carried_cap_pv_array_mw, dtype=float)  # shape (n_bus,)
             carried_wt = np.asarray(self.carried_cap_wt_array_mw, dtype=float)
-
-            # new = new_pv_mw_array
-            # total = carried + new
-            # x_pv_mw = total
-            # new_wt = new_wt_mw_array
-            # total_wt = carried_wt + new_wt
-            # x_wt_mw = total_wt
 
             # TOTAL installed after stage 2
             x_pv_mw = carried_pv + new_pv_mw_array  # (n_bus,)
             x_wt_mw = carried_wt + new_wt_mw_array  # (n_wt,)
-
-            # print("len carried =", len(carried_pv), "len x_pv_mw =", len(x_pv_mw), "n_bus =", n_bus, "len bus_indices =", len(bus_indices))
-            # print("Carried PV capacity from stage 1 (MW):", carried_pv.sum())
-            # print("New PV capacity in stage 2 (MW):", new_pv_mw_array.sum())
-            # print("Total PV capacity after stage 2 (MW):", x_pv_mw.sum())
-            # print()
-            # print("Carried WT capacity from stage 1 (MW):", carried_wt.sum())
-            # print("New WT capacity in stage 2 (MW):", new_wt_mw_array.sum())
-            # print("Total WT capacity after stage 2 (MW):", x_wt_mw.sum())
 
             # ------------------ BESS Carried Capacity per Cluster ------------------
             x_bess_bus_total = []
@@ -432,6 +417,7 @@ class MyProblem(ElementwiseProblem):
                 # ---> Sanity test for opex function
                 # x_pv_bus = [72, 82, 48]
                 # x_pv_mw = [1.0, 0.5, 0.3]
+                # x_wt_mw = [1.0]  # example WT sizes for the 2 transformer buses
                 # bus_to_cluster = {
                 #     72: "industrial_C1",
                 #     82: "commercial_C1",
@@ -439,10 +425,12 @@ class MyProblem(ElementwiseProblem):
                 # }
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year:  + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -513,11 +501,12 @@ class MyProblem(ElementwiseProblem):
                 #     48: "residential_C1"
                 # }
                 cost_opex = opex(stage=self.stage, year=year,
+                            bus_to_cluster=bus_to_cluster,
                             x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                            bus_to_cluster=bus_to_cluster)
+                            x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -584,11 +573,12 @@ class MyProblem(ElementwiseProblem):
                 #     48: "residential_C1"
                 # }
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt   # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -655,11 +645,12 @@ class MyProblem(ElementwiseProblem):
                 #     48: "residential_C1"
                 # }
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: +opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -726,11 +717,12 @@ class MyProblem(ElementwiseProblem):
                 #     48: "residential_C1"
                 # }
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year:  + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -813,10 +805,12 @@ class MyProblem(ElementwiseProblem):
                 bus_to_cluster = cluster.build_bus_cluster_map()
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -868,10 +862,12 @@ class MyProblem(ElementwiseProblem):
                 bus_to_cluster = cluster.build_bus_cluster_map()
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -922,10 +918,12 @@ class MyProblem(ElementwiseProblem):
                 bus_to_cluster = cluster.build_bus_cluster_map()
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -974,10 +972,12 @@ class MyProblem(ElementwiseProblem):
                 bus_to_cluster = cluster.build_bus_cluster_map()
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year: + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -1027,10 +1027,12 @@ class MyProblem(ElementwiseProblem):
                 bus_to_cluster = cluster.build_bus_cluster_map()
 
                 cost_opex = opex(stage=self.stage, year=year,
+                                 bus_to_cluster=bus_to_cluster,
                                  x_pv_bus=x_pv_bus, x_pv_mw=x_pv_mw,
-                                 bus_to_cluster=bus_to_cluster)
+                                 x_wt_mw=x_wt_mw * x_wt_bin)
                 opex_pv = cost_opex.opex_pv()
-                opex_year = opex_pv  # TOTAL OPEX of the year: + opex_wt + opex_bess (add later when those are ready)
+                opex_wt = cost_opex.opex_wt()
+                opex_year = opex_pv + opex_wt  # TOTAL OPEX of the year:  + opex_bess (add later when those are ready)
 
                 opex_year_npv = opex_year * (1 / (1 + discount_rate) ** year_index)
 
@@ -1052,7 +1054,7 @@ class MyProblem(ElementwiseProblem):
                 g_years.append(g_voltage)
                 print("g_list: \n", g_years)
             # =============================================== Stage 3 ================================================
-            # Comes later...
+            # Further years will come later...
         print()
         print(f"Stage {self.stage} Total Cost: {total_stage_cost}")
         print("G_list: ", g_years)
@@ -1112,13 +1114,11 @@ carried_bess_bus_by_cluster = np.full(n_clusters, -1, dtype=int)  # -1 means "no
 all_stage_results = []
 total_project_cost = 0
 
-# years = list(range(2026, 2027))
-
 pop_size = 2
 gen_size = 2
 
 # ================= STAGE-LEVEL OPTIMIZATION =================
-for stage_num in [2]:     # CHANGE: for stage_num in [1, 2, 3]:
+for stage_num in [1, 2]:     # CHANGE: for stage_num in [1, 2, 3]:
     stage_years = stages[stage_num]
 
     print(f"\n{'=' * 50}")

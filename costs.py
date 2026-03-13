@@ -1,3 +1,9 @@
+"""
+Costs for CAPEX are included here.
+For now, only PV, WT and BESS CAPEX are included.
+
+"""
+
 
 # =================================== PV COSTS ===================================
 
@@ -73,8 +79,8 @@ pv_capex_mixed_2031 = pv_capex_mixed_2030 - (pv_capex_mixed_2030*0.12)
 
 PV_CAPEX = {
     2026: {"industrial": pv_capex_industrial_2026, "residential": pv_capex_residential_2026, "commercial": pv_capex_commercial_2026, "mixed": pv_capex_mixed_2026},
-    2027: {"industrial": 880, "residential": 1080, "commercial": 980,  "mixed": 930},
-    # ...
+    # 2027: {"industrial": 880, "residential": 1080, "commercial": 980,  "mixed": 930},
+    # ... No CAPEX needed in the middle years
     2031: {"industrial": pv_capex_industrial_2031, "residential": pv_capex_residential_2031,  "commercial": pv_capex_commercial_2031,  "mixed": pv_capex_mixed_2031},
 }
 

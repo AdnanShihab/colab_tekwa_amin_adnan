@@ -1,4 +1,19 @@
-# 2024.07.25
+"""
+This code is for the power flow calculation of the electricity network for the year 2026 with time series data
+for February (winter). The code uses the pandapower library to perform power flow calculations and includes time series
+data for electricity demand, PV irradiance, and wind power.
+
+The code also includes a BESS fleet for energy storage and dispatch based on the residual signal between load and
+renewable generation.
+
+The results of the power flow calculations are stored in a DataFrame and include demand, PV/WT/CHP generation,
+BESS state of charge, and voltage at each bus.
+
+The code is structured to allow for easy modification to analyze different years and time periods by changing
+the input time series data.
+
+Only def power_flow_timeseries is being used.
+"""
 
 import pandas as pd
 import numpy as np
@@ -140,6 +155,9 @@ wt_ts_jun = pd.DataFrame(wind_time_series['wt_power_jun_norm'])
 wt_ts_oct = pd.DataFrame(wind_time_series['wt_power_oct_norm'])
 # print(wind_time_series)
 
+# Time series for Electricity Demand, PV irradiance, and Wind power for each year.
+# This is the input for the power flow calculations; used in Main function for each year as "data = TS[year]".
+# The heat demand time series will also be added soon...
 TS = {
     2026: {
         "e_demand": e_demand_2026_feb,
